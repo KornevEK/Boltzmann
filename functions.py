@@ -1,13 +1,7 @@
-
-# coding: utf-8
-
-# In[ ]:
-
-
-get_ipython().magic(u'matplotlib inline')
-
+from collections import namedtuple
 import numpy as np
 from matplotlib import pyplot as plt
+plt.switch_backend('agg')
 import time
 import tt
 
@@ -22,16 +16,7 @@ def rs(f1, f2, f, vx_, N):
 def F_m(vx, vy, vz, T, n, p):
     return n * ((1. / (2. * np.pi * p.Rg * T)) ** (3. / 2.)) * (np.exp(-(vx*vx + vy*vy + vz*vz) / (2. * p.Rg * T)))
 
-def J(f, vmax, N, p):
-
-    hv = 2. * vmax / N
-    vx_ = np.linspace(-vmax+hv/2, vmax-hv/2, N)
-
-    vx, vy, vz = np.meshgrid(vx_, vx_, vx_, indexing='ij')
-
-    assert np.all(vx[:,0,0] == vx_)
-    assert np.all(vy[0,:,0] == vx_)
-    assert np.all(vz[0,0,:] == vx_)
+def J(f, vx, vy, vz, hv, N, p):
 
     n = (hv ** 3) * np.sum(f)
 
@@ -68,7 +53,9 @@ def J(f, vmax, N, p):
 
     J = (f_plus - f) * (P / mu)
     
-    return J, n, ux, T
+    nu = P / mu
+    
+    return J, n, ux, T, nu
 
 def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
 
@@ -124,8 +111,8 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
     Vel = np.zeros(L)
     Temp = np.zeros(L)
     
-    Frob_norm = np.array([])
-    C_norm = np.array([])
+    Frob_norm_RHS = np.zeros(L)
+    Frob_norm_iter = np.array([])
     
     t1 = time.clock()
     
@@ -155,9 +142,13 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
             
         # compute RHS
         for i in range(L):
-            RHS[i, :, :, :] = (- Flow[i+1, :, :, :] + Flow[i, :, :, :]) / h + J(f[i, :, :, :], vmax, N, p)[0]
-            Frob_norm = np.append(Frob_norm, np.linalg.norm(RHS))
-            C_norm = np.append(C_norm, np.max(np.absolute(np.ravel(RHS))))
+            RHS[i, :, :, :] = (- Flow[i+1, :, :, :] + Flow[i, :, :, :]) / h + J(f[i, :, :, :], vx, vy, vz, hv, N, p)[0]
+#            Frob_norm = np.append(Frob_norm, np.linalg.norm(RHS))
+#            C_norm = np.append(C_norm, np.max(np.absolute(np.ravel(RHS))))
+            
+#        nu = 
+
+	Frob_norm_iter = np.append(Frob_norm_iter, sum([np.linalg.norm(RHS[i]) for i in range(L)]))
 
         # update values
         for i in range(L):
@@ -176,22 +167,36 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
     Temp = np.zeros(L)
     
     for i in range(L):
-        Dens[i] = J(f[i, :, :, :], vmax, N, p)[1]
-        Vel[i] = J(f[i, :, :, :], vmax, N, p)[2]
-        Temp[i] = J(f[i, :, :, :], vmax, N, p)[3]
+        Dens[i] = J(f[i, :, :, :], vx, vy, vz, hv, N, p)[1]
+        Vel[i] = J(f[i, :, :, :], vx, vy, vz, hv, N, p)[2]
+        Temp[i] = J(f[i, :, :, :], vx, vy, vz, hv, N, p)[3]
         
-    print "time =", t2
+    print "time =", t2 / 3600, "h", (t2 % 3600) / 60, "m", t2 % 60, "s"
     
-    fig, ax = plt.subplots(figsize = (20,10))
-    line, = ax.semilogy(Frob_norm)
-    line.set_label('Frob_norm')
-    line, = ax.semilogy(C_norm)
-    line.set_label('C_norm')
-    ax.legend()
+#    fig, ax = plt.subplots(figsize = (20,10))
+#    line, = ax.semilogy(Frob_norm)
+#    line.set_label('Frob_norm')
+#    line, = ax.semilogy(C_norm)
+#    line.set_label('C_norm')
+#    ax.legend()
     
-    return f, Dens, Vel, Temp
+    l = 1. / ((2 ** .5) * np.pi * n_l * p.d * p.d)
+        
+    delta = l / (n_r - n_l) * np.max(Dens[1:] - Dens[:-1]) / (2 * h)
 
+    for i in range(L):
+        Frob_norm_RHS[i] = np.linalg.norm(RHS[i])
     
+    Return = namedtuple('Return', ['f', 'Dens', 'Vel', 'Temp', 'delta', 'Frob_norm_iter', 'Frob_norm_RHS'])
+    
+    S = Return(f, Dens, Vel, Temp, delta, Frob_norm_iter, Frob_norm_RHS)
+    
+    return S
+
+
+# In[2]:
+
+
 def rs_tt(f1, f2, vx_l, vx_r):
     return vx_l * f1 + vx_r * f2
 
@@ -240,7 +245,9 @@ def J_tt(f, vx, vy, vz, vx_tt, vy_tt, vz_tt, hv, N, r, p):
     J = (f_plus - f) * (P / mu)
     J = J.round(r)
     
-    return J, n, ux, T
+    nu = P / mu
+    
+    return J, n, ux, T, nu
 
 def save_tt(filename, f, L, N):
     
@@ -267,7 +274,11 @@ def load_tt(filename, L, N):
         
     return f
 
-def solver_tt(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, r, p):
+
+# In[3]:
+
+
+def solver_tt(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, r, p, filename, init = '0'):
     
     h = (x_r - x_l) / L 
     tau = h * CFL / vmax / 10
@@ -317,11 +328,6 @@ def solver_tt(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, r, p):
 #    f = f.extend(list(F_r for i in range(L/2+1, L)))
 
     f = list(tt.tensor(np.zeros((N, N, N))) for i in range(L))
-    
-    for i in range(L/2+1):
-        f[i] = F_l
-    for i in range(L/2+1, L):
-        f[i] = F_r
         
 #    for i in range(L):
 #        f[i] = tt.tensor(f[i])
@@ -332,12 +338,22 @@ def solver_tt(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, r, p):
     f_r = list(0. * tt.ones((N,N,N)) for i in range(L+1))
     Flow = list(0. * tt.ones((N,N,N)) for i in range(L+1))
     RHS = list(0. * tt.ones((N,N,N)) for i in range(L))
-    J_ = list(0. * tt.ones((N,N,N)) for i in range(L))
+    j = list(0. for i in range(L))
+    jj = list(0. * tt.ones((N,N,N)) for i in range(L))
     
 
-    Frob_norm = np.zeros(L)
+    Frob_norm_RHS = np.zeros(L)
     Frob_norm_iter = np.array([])
 #    C_norm_iter = np.array([])
+
+    if (init == '0'):
+        for i in range(L/2+1):
+            f[i] = F_l
+        for i in range(L/2+1, L):
+            f[i] = F_r
+            
+    else:
+        f = load_tt(init, L, N)
         
     t1 = time.clock()
     
@@ -372,26 +388,26 @@ def solver_tt(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, r, p):
             
         # compute RHS
         for i in range(L):
-            J_[i] = J_tt(f[i], vx, vy, vz, vx_tt, vy_tt, vz_tt, hv, N, r, p)
-            RHS[i] = (- Flow[i+1] + Flow[i]) * (1. / h) + J_[i][0]
+            j[i] = J_tt(f[i], vx, vy, vz, vx_tt, vy_tt, vz_tt, hv, N, r, p)
+            jj[i] = j[i][0]
+            RHS[i] = (- Flow[i+1] + Flow[i]) * (1. / h) + jj[i]
             RHS[i] = RHS[i].round(r)
             
-        if (((t/tau) % 100) == 1):
-            for i in range(L):
-                Frob_norm[i] = RHS[i].norm()
+        nu = max(j[i][4] for i in range(L))
+        
+#        if (((t/tau) % 100) == 1):
+#            for i in range(L):
+#                Frob_norm_RHS[i] = RHS[i].norm()
                 
                 
-            fig, ax = plt.subplots(figsize = (20,10))
-            ax.plot(Frob_norm)
+#            fig, ax = plt.subplots(figsize = (20,10))
+#            ax.semilogy(Frob_norm_RHS)
 
-            ax.set(title='RHS frob norm')
+#            ax.set(title='RHS frob norm')
 
-            fig.savefig("RHS.png")
+#            fig.savefig("RHS.png")
             
-            
-            save_tt('file.txt', f, L, N)
-                
-        Frob_norm_iter = np.append(Frob_norm_iter, RHS[i].norm())
+        Frob_norm_iter = np.append(Frob_norm_iter, sum([RHS[i].norm() for i in range(L)]))
 
         # update values
         for i in range(L):
@@ -408,6 +424,10 @@ def solver_tt(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, r, p):
         
     t2 = time.clock() - t1
     
+    t2 = int(round(t2))
+    
+    print "time =", t2 / 3600, "h", (t2 % 3600) / 60, "m", t2 % 60, "s"
+    
     Dens = np.zeros(L)
     Vel = np.zeros(L)
     Temp = np.zeros(L)
@@ -416,13 +436,24 @@ def solver_tt(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, r, p):
 
     for i in range(L):
         
-        Dens[i] = J_[i][1]
-        Vel[i] = J_[i][2]
-        Temp[i] = J_[i][3]
-
-
-    print "time =", t2
+        Dens[i] = j[i][1]
+        Vel[i] = j[i][2]
+        Temp[i] = j[i][3]
+        
+    l = 1. / ((2 ** .5) * np.pi * n_l * p.d * p.d)
+        
+    delta = l / (n_r - n_l) * np.max(Dens[1:] - Dens[:-1]) / (2 * h)
     
+    save_tt(filename, f, L, N)
     
-    return f, Dens, Vel, Temp, Frob_norm_iter#, C_norm_iter
+    for i in range(L):
+        Frob_norm_RHS[i] = RHS[i].norm()
 
+    
+#    print nu
+
+    Return = namedtuple('Return', ['f', 'Dens', 'Vel', 'Temp', 'delta', 'Frob_norm_iter', 'Frob_norm_RHS'])
+    
+    S = Return(f, Dens, Vel, Temp, delta, Frob_norm_iter, Frob_norm_RHS)
+    
+    return S
