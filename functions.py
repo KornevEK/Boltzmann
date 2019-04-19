@@ -162,6 +162,8 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
      
         
     t2 = time.clock() - t1
+
+    t2 = int(round(t2))
     Dens = np.zeros(L)
     Vel = np.zeros(L)
     Temp = np.zeros(L)
@@ -170,6 +172,8 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
         Dens[i] = J(f[i, :, :, :], vx, vy, vz, hv, N, p)[1]
         Vel[i] = J(f[i, :, :, :], vx, vy, vz, hv, N, p)[2]
         Temp[i] = J(f[i, :, :, :], vx, vy, vz, hv, N, p)[3]
+
+	t2 = int(round(t2))
         
     print "time =", t2 / 3600, "h", (t2 % 3600) / 60, "m", t2 % 60, "s"
     
