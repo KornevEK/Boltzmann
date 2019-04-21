@@ -57,7 +57,7 @@ def J(f, vx, vy, vz, hv, N, p):
     
     return J, n, ux, T, nu
 
-def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
+def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p, filename, init = '0'):
 
     h = (x_r - x_l) / L 
     tau = h * CFL / vmax / 10
@@ -94,10 +94,7 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
     
     # initial condition 
     f = np.zeros((L, N, N, N))
-    for i in range(L/2+1):
-        f[i, :, :, :] = F_l
-    for i in range(L/2+1, L):
-        f[i, :, :, :] = F_r
+    
     
     slope = np.zeros((L, N, N, N))
     tmp = np.zeros((L, N, N, N))
@@ -113,6 +110,16 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
     
     Frob_norm_RHS = np.zeros(L)
     Frob_norm_iter = np.array([])
+    
+    # initial condition 
+    if (init == '0'):
+        for i in range(L/2+1):
+            f[i, :, :, :] = F_l
+        for i in range(L/2+1, L):
+            f[i, :, :, :] = F_r
+            
+    else:
+        f = np.reshape(np.loadtxt(init), (L, N, N, N))
     
     t1 = time.clock()
     
@@ -148,7 +155,7 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
             
 #        nu = 
 
-	Frob_norm_iter = np.append(Frob_norm_iter, sum([np.linalg.norm(RHS[i]) for i in range(L)]))
+        Frob_norm_iter = np.append(Frob_norm_iter, sum([np.linalg.norm(RHS[i]) for i in range(L)]))
 
         # update values
         for i in range(L):
@@ -173,7 +180,7 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
         Vel[i] = J(f[i, :, :, :], vx, vy, vz, hv, N, p)[2]
         Temp[i] = J(f[i, :, :, :], vx, vy, vz, hv, N, p)[3]
 
-	t2 = int(round(t2))
+    t2 = int(round(t2))
         
     print "time =", t2 / 3600, "h", (t2 % 3600) / 60, "m", t2 % 60, "s"
     
@@ -187,6 +194,8 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p):
     l = 1. / ((2 ** .5) * np.pi * n_l * p.d * p.d)
         
     delta = l / (n_r - n_l) * np.max(Dens[1:] - Dens[:-1]) / (2 * h)
+    
+    np.savetxt(filename, np.ravel(f))
 
     for i in range(L):
         Frob_norm_RHS[i] = np.linalg.norm(RHS[i])
@@ -263,7 +272,7 @@ def save_tt(filename, f, L, N):
         F[:4, i] = f[i].r.ravel()
         F[4:f[i].core.size+4, i] = f[i].core.ravel()
     
-        np.savetxt(filename, F)#, fmt='%s')
+    np.savetxt(filename, F)#, fmt='%s')
     
 def load_tt(filename, L, N):
     

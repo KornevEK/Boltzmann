@@ -85,7 +85,7 @@ print (Boltzmann.J(M_r, vx, vy, vz, hv, N, p)[3] - T_r) / u_r
 
 
 S = Boltzmann.solver(x_l = x_l, x_r = x_r, L = L, Tau = Tau, CFL = CFL, vmax = vmax,
-           N = N, n_l = n_l, u_l = u_l, T_l = T_l, p = p)
+           N = N, n_l = n_l, u_l = u_l, T_l = T_l, p = p, filename = 'file.txt')
            
            
 print 'delta =', S.delta
