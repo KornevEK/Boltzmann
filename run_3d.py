@@ -24,7 +24,7 @@ class Params(object):
     
         self.g = 5. / 3.
         
-        self.d = 2 * 183e-12
+        self.d = 3418e-13
 
 p = Params()
 
@@ -114,6 +114,7 @@ plt.savefig('profile.png')
 
 fig, ax = plt.subplots(figsize = (20,10))
 line, = ax.semilogy(S.Frob_norm_iter)
+ax.set(title='$Steps =$' + str(Tau))
 plt.savefig('norm_iter.png')
 
 

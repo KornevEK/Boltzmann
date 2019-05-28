@@ -1,6 +1,7 @@
 from collections import namedtuple
 import numpy as np
 from matplotlib import pyplot as plt
+plt.switch_backend('agg')
 import time
 
 from read_starcd import Mesh
@@ -173,6 +174,12 @@ def solver(mesh, vmax, N, Tau, CFL, n_l, u_l, T_l, p, filename, init = '0'):
             tmp[ic, :, :, :] = f[ic, :, :, :] + tau * RHS[ic, :, :, :]
                 
         f = tmp
+        
+        if ((int(t/tau) % 100) == 0):     
+            fig, ax = plt.subplots(figsize = (20,10))
+            line, = ax.semilogy(Frob_norm_iter)
+            ax.set(title='$Steps =$' + str(int(t/tau)))
+            plt.savefig('norm_iter.png')
         
         
     t2 = time.clock() - t1

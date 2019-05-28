@@ -23,28 +23,33 @@ class Params(object):
     
         self.g = 5. / 3.
         
-        self.d = 183e-12
+        self.d = 3418e-13
 
 p = Params()
 
-L = 30
-N = 30
+L = 20
+N = 20
 vmax = 2000.
 
-n_l = 2e+23 
-u_l = 400.
-T_l = 300.
+n_l = 2e+23
 
-M = u_l / ((p.g * p.Rg * T_l) ** .5)
+M = 1.55
+
+T_l = 400.
+u_l = M * ((p.g * p.Rg * T_l) ** .5)
+#u_l = 500.
+#T_l = 300.
+
+#M = u_l / ((p.g * p.Rg * T_l) ** .5)
 
 n_r = (p.g + 1.) * M * M / ((p.g - 1.) * M * M + 2.) * n_l
 u_r = ((p.g - 1.) * M * M + 2.) / ((p.g + 1.) * M * M) * u_l
 T_r = (2. * p.g * M * M - (p.g - 1.)) * ((p.g - 1.) * M * M + 2.) / ((p.g + 1) ** 2 * M * M) * T_l
 
-l = 1. / ((2 ** .5) * np.pi * n_l * p.d * p.d)
+l = 1. / ((2 ** .5) * np.pi * n_l * p.d * p.d * 1.089)
 
-x_l = -20*l
-x_r = 20*l
+x_l = -10*l
+x_r = 10*l
 
 h = (x_r - x_l) / L
 
@@ -53,7 +58,7 @@ x = np.linspace(x_l+h/2, x_r-h/2, L) / l
 #x_l = -20*l
 #x_r = 20*l
 
-Tau = 100
+Tau = 3000
 
 CFL = 0.5
 
@@ -111,6 +116,7 @@ ax.legend(loc=6)
 ax1.legend(loc=7)
 
 ax.set(title='$\delta =$' + str(S_tt.delta))
+ax.text(0.0, 0.0, 'M =' + str(M) + ' ' + 'u =' + str(int(round(u_l))) + ' ' + 'T =' + str(int(round(T_l))))
 plt.savefig('profile.png')
 
 
@@ -131,6 +137,7 @@ plt.savefig('velo.png')
 
 fig, ax = plt.subplots(figsize = (20,10))
 line, = ax.semilogy(S_tt.Frob_norm_iter)
+ax.set(title='$Steps =$' + str(Tau))
 plt.savefig('norm_iter.png')
 
 

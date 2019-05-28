@@ -165,6 +165,11 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p, filename, init = '0
         
 #        print np.linalg.norm(RHS)
 #        print np.max(np.absolute((j)))
+        if ((int(t/tau) % 100) == 0):     
+            fig, ax = plt.subplots(figsize = (20,10))
+            line, = ax.semilogy(Frob_norm_iter)
+            ax.set(title='$Steps =$' + str(int(t/tau)))
+            plt.savefig('norm_iter.png')
         
      
         
@@ -186,9 +191,9 @@ def solver(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, p, filename, init = '0
 #    line.set_label('C_norm')
 #    ax.legend()
     
-    l = 1. / ((2 ** .5) * np.pi * n_l * p.d * p.d)
+    l = 1. / ((2 ** .5) * np.pi * n_l * p.d * p.d * 1.089)
         
-    delta = l / (n_r - n_l) * np.max(Dens[1:] - Dens[:-1]) / (2 * h)
+    delta = l / (n_r - n_l) * np.max(Dens[2:] - Dens[:-2]) / (2 * h)
     
     np.savetxt(filename, np.ravel(f))
 
@@ -406,6 +411,12 @@ def solver_tt(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, r, p, filename, ini
             
         for i in range(L):    
             f[i] = tmp[i]
+            
+        if ((int(t/tau) % 100) == 0):     
+            fig, ax = plt.subplots(figsize = (20,10))
+            line, = ax.semilogy(Frob_norm_iter)
+            ax.set(title='$Steps =$' + str(int(t/tau)))
+            plt.savefig('norm_iter.png')
 
         
     t2 = time.clock() - t1
@@ -422,7 +433,7 @@ def solver_tt(x_l, x_r, L, Tau, CFL, vmax, N, n_l, u_l, T_l, r, p, filename, ini
         
     l = 1. / ((2 ** .5) * np.pi * n_l * p.d * p.d)
         
-    delta = l / (n_r - n_l) * np.max(Dens[1:] - Dens[:-1]) / (2 * h)
+    delta = l / (n_r - n_l) * np.max(Dens[2:] - Dens[:-2]) / (2 * h)
     
     save_tt(filename, f, L, N)
     
