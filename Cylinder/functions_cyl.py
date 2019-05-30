@@ -147,9 +147,9 @@ def solver(p, mesh, M, Kn, n_l, T_l, T_wall, Tau, vmax, N, CFL, filename, init =
                     f_minus[jf, :, :, :] = F_l
             elif (mesh.bound_face_info[j, 1] == 3): # outlet
                 if (mesh.bound_face_info[j, 2] == 1):
-                    f_plus[jf, :, :, :] = F_r
+                    f_plus[jf, :, :, :] = F_l
                 else:
-                    f_minus[jf, :, :, :] = F_r
+                    f_minus[jf, :, :, :] = F_l
             elif (mesh.bound_face_info[j, 1] == 4): # wall
                 if (mesh.bound_face_info[j, 2] == 1):
                     n_wall = J(f_minus[jf, :, :, :], vx, vy, vz, hv, N, p)[1]
