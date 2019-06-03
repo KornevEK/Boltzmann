@@ -135,22 +135,22 @@ def solver(p, mesh, M, Kn, n_l, T_l, T_wall, Tau, vmax, N, CFL, filename, init =
         for j in range(mesh.nbf):
             jf = mesh.bound_face_info[j, 0] # global face index
                 # TODO: think how do this without 'if'
-            if (mesh.bound_face_info[j, 1] == 1): # symmetry
+            if (mesh.bound_face_info[j, 1] == 0): # symmetry
                 if (mesh.bound_face_info[j, 2] == 1):
                     f_plus[jf, :, :, :] = f_minus[jf, :, :, :]
                 else:
                     f_minus[jf, :, :, :] = f_plus[jf, :, :, :]
-            elif (mesh.bound_face_info[j, 1] == 2): # inlet
+            elif (mesh.bound_face_info[j, 1] == 1): # inlet
                 if (mesh.bound_face_info[j, 2] == 1):
                     f_plus[jf, :, :, :] = F_l
                 else:
                     f_minus[jf, :, :, :] = F_l
-            elif (mesh.bound_face_info[j, 1] == 3): # outlet
+            elif (mesh.bound_face_info[j, 1] == 2): # outlet
                 if (mesh.bound_face_info[j, 2] == 1):
                     f_plus[jf, :, :, :] = F_l
                 else:
                     f_minus[jf, :, :, :] = F_l
-            elif (mesh.bound_face_info[j, 1] == 4): # wall
+            elif (mesh.bound_face_info[j, 1] == 3): # wall
                 if (mesh.bound_face_info[j, 2] == 1):
                     n_wall = J(f_minus[jf, :, :, :], vx, vy, vz, hv, N, p)[1]
                     f_plus[jf, :, :, :] = n_wall * F_wall
