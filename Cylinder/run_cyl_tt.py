@@ -8,7 +8,7 @@ import tt
 from read_starcd import Mesh
 from read_starcd import write_tecplot
 
-import functions_cyl as Boltzmann_cyl
+import functions_cyl_tt as Boltzmann_cyl
 
 # compute parameters for flow around cylinder
 
