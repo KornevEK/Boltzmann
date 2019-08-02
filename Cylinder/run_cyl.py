@@ -9,91 +9,85 @@ from read_starcd import write_tecplot
 
 import functions_cyl as Boltzmann_cyl
 
-class Params(object):
- 
-    def __init__(self):
-        #fundamental constants
-        self.Na = 6.02214129e+23
-        self.kB = 1.381e-23 # J / K
-        #gas parameters
-        self.Mol = 40e-3 # kg / mol
-        self.Rg = 8.3144598  / self.Mol  # J / (kg * K) 
-        self.m = self.Mol / self.Na # kg
-    
-        self.Pr = 2. / 3.
-        self.C = 144.4
-        self.T_0 = 273.11
-        self.mu_0 = 2.125e-05
-    
-        self.g = 5. / 3.
-        
-        self.d = 3418e-13
+# compute parameters for flow around cylinder
 
-p = Params()
+# Parameters for argon (default)
+gas_params = Boltzmann_cyl.GasParams()
 
-#l = 1. / ((2 ** .5) * np.pi * n_l * p.d * p.d)
-
-Tau = 10000
-
-M = 10.
+Mach = 10.
 Kn = 0.564
+delta = 8.0 / (5 * np.pi**0.5 * Kn)
+n_l = 2e+23
+T_l = 200.
+u_l = Mach * ((gas_params.g * gas_params.Rg * T_l) ** 0.5)
+T_w = 5.0 * T_l
 
+f_init = lambda x, y, z, vx, vy, vz: Boltzmann_cyl.f_maxwell(vx, vy, vz, T_l, n_l, u_l, 0., 0., gas_params.Rg)
 
-n_l = 2e+23 
-T_l = 300.
-T_wall = T_l*5
-
+problem = Boltzmann_cyl.Problem(bc_type_list = ['sym-z', 'in', 'out', 'wall', 'sym-y'],
+                                bc_data = [[],
+                                           [n_l, u_l, 0., 0., T_l],
+                                           [n_l, u_l, 0., 0., T_l],
+                                           [T_w],
+                                           []], f_init = f_init)
 n_s = n_l
 T_s = T_l
-l_s = 1.#100*l
    
-p_s = p.m * n_s * p.Rg * T_s
+p_s = gas_params.m * n_s * gas_params.Rg * T_s
     
-v_s = np.sqrt(2. * p.Rg * T_s)
-  
-lambda_s = Kn * l_s
+v_s = np.sqrt(2. * gas_params.Rg * T_s)
+mu_s = gas_params.mu(T_s)
 
+l_s = delta * mu_s * v_s / p_s
 
-N = 45
+print('l_s = ', l_s)
+
+print('v_s = ', v_s) 
+
+nv = 64
 vmax = 22 * v_s
 
+print('vmax =', vmax)
 
 CFL = 0.5
 
 mesh = Mesh() 
 
-path = './Cylinder/'
+path = './'
 mesh.read_starcd(path, l_s)
 
 L = mesh.nc
 
-print 'Max =', M
+print 'Mach =', Mach
+nt = 7000
 
-S = Boltzmann_cyl.solver(p=p, mesh=mesh, M=M, Kn=Kn, n_l=n_l, T_l=T_l, T_wall=T_wall, Tau=Tau, vmax=vmax, N=N,
-           CFL=CFL, filename = 'file.txt')
+S = Boltzmann_cyl.solver(gas_params, problem, mesh, nt, vmax, nv, CFL, filename = 'file-out.npy', init = 'macroparameters_data_init.txt')
 
-
-           
-           
 fig, ax = plt.subplots(figsize = (20,10))
 
-colors = cm.rainbow((S.Temp - np.min(S.Temp))/(np.max(S.Temp) - np.min(S.Temp)))
+colors = cm.rainbow((S.T - np.min(S.T))/(np.max(S.T) - np.min(S.T)))
 ax.scatter(mesh.cell_center_coo[:, 0] / l_s, mesh.cell_center_coo[:, 1] / l_s, s = 10, c=colors)
 plt.savefig('scatter.png')
+plt.close()
 
 fig, ax = plt.subplots(figsize = (20,10))
-line, = ax.semilogy(S.Frob_norm_iter)
-ax.set(title='$Steps =$' + str(Tau))
+line, = ax.semilogy(S.frob_norm_iter/S.frob_norm_iter[0])
+ax.set(title='$Steps =$' + str(nt))
 plt.savefig('norm_iter.png')
+plt.close()
 
 #fig, ax = plt.subplots(figsize = (20,10))
 #line, = ax.semilogy(mesh.cell_center_coo[:, 0] / l, S.Frob_norm_RHS)
 #plt.savefig('norm_rhs.png')
 
-data = np.zeros((L, 3))
+data = np.zeros((L, 7))
     
-data[:, 0] = S.Dens[:]
-data[:, 1] = S.Vel[:]
-data[:, 2] = S.Temp[:]
+data[:, 0] = S.n[:]
+data[:, 1] = S.ux[:]
+data[:, 2] = S.uy[:]
+data[:, 3] = S.uz[:]
+data[:, 4] = S.p[:]
+data[:, 5] = S.T[:]
+data[:, 6] = np.zeros(mesh.nc)
 
-write_tecplot(mesh, data, 'cyl.dat', ('Dens', 'Vel', 'Temp'))
+write_tecplot(mesh, data, 'cyl.dat', ('n', 'ux', 'uy', 'uz', 'p', 'T', 'rank'))

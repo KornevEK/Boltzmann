@@ -1,22 +1,96 @@
 from collections import namedtuple
 import numpy as np
 from matplotlib import pyplot as plt
+plt.switch_backend('agg')
 import matplotlib.cm as cm
 import time
+from read_starcd import write_tecplot
 
-def rs(f1, f2, f, vx_, N):
-    for j in range(N):
-        if (vx_[j] > 0.):
-            f[j, :, :] = vx_[j] * f1[j, :, :]
-        else:
-            f[j, :, :] = vx_[j] * f2[j, :, :]
-    return f
+def f_maxwell(vx, vy, vz, T, n, ux, uy, uz, Rg):
+    """Compute maxwell distribution function on cartesian velocity mesh
     
-def F_m(vx, vy, vz, T, n, p):
-    return n * ((1. / (2. * np.pi * p.Rg * T)) ** (3. / 2.)) * (np.exp(-(vx*vx + vy*vy + vz*vz) / (2. * p.Rg * T)))
+    vx, vy, vz - 3d numpy arrays with x, y, z components of velocity mesh
+    in each node
+    T - float, temperature in K
+    n - float, numerical density
+    ux, uy, uz - floats, x,y,z components of equilibrium velocity
+    Rg - gas constant for specific gas
+    """
+    return n * ((1. / (2. * np.pi * Rg * T)) ** (3. / 2.)) * (np.exp(-((vx - ux)**2 + (vy - uy)**2 + (vz - uz)**2) / (2. * Rg * T)))
 
-def J(f, vx, vy, vz, hv, N, p):
+class GasParams:
+    Na = 6.02214129e+23 # Avogadro constant
+    kB = 1.381e-23 # Boltzmann constant, J / K
+    Ru = 8.3144598 # Universal gas constant
 
+    def __init__(self, Mol = 40e-3, Pr = 2. / 3., g = 5. / 3., d = 3418e-13):
+        self.Mol = Mol
+        self.Rg = self.Ru  / self.Mol  # J / (kg * K) 
+        self.m = self.Mol / self.Na # kg
+    
+        self.Pr = Pr
+        
+        self.C = 144.4
+        self.T_0 = 273.11
+        self.mu_0 = 2.125e-05
+        self.mu_suth = lambda T: self.mu_0 * ((self.T_0 + self.C) / (T + self.C)) * ((T / self.T_0) ** (3. / 2.))
+        self.mu = lambda T: self.mu_suth(200.) * (T/200.)**0.734
+        self.g = g # specific heat ratio
+        self.d = d # diameter of molecule
+        
+class Problem:
+    def __init__(self, bc_type_list = None, bc_data = None, f_init = None):
+        # list of boundary conditions' types
+        # acording to order in starcd '.bnd' file
+        # list of strings
+        self.bc_type_list = bc_type_list
+        # data for b.c.: wall temperature, inlet n, u, T and so on.
+        # list of lists
+        self.bc_data = bc_data
+        # Function to set initial condition
+        self.f_init = f_init
+        
+def set_bc(gas_params, bc_type, bc_data, f, vx, vy, vz, v_nil):
+    """Set boundary condition
+    """
+    if (bc_type == 'sym-x'): # symmetry in x
+        return f[::-1, :, :]
+    elif (bc_type == 'sym-y'): # symmetry in y
+        return f[:, ::-1, :]
+    elif (bc_type == 'sym-z'): # symmetry in z
+        return f[:, :, ::-1]
+    elif (bc_type == 'in'): # inlet
+        # unpack bc_data
+        n =  bc_data[0]
+        ux = bc_data[1]
+        uy = bc_data[2]
+        uz = bc_data[3]
+        T =  bc_data[4]
+        return f_maxwell(vx, vy, vz, T, n, ux, uy, uz, gas_params.Rg)
+    elif (bc_type == 'out'): # outlet
+        # unpack bc_data
+        n =  bc_data[0]
+        ux = bc_data[1]
+        uy = bc_data[2]
+        uz = bc_data[3]
+        T =  bc_data[4]
+        return f_maxwell(vx, vy, vz, T, n, ux, uy, uz, gas_params.Rg)
+    elif (bc_type == 'wall'): # wall
+        # unpack bc_data
+        T_w = bc_data[0]
+        hv = vx[1, 0, 0] - vx[0, 0, 0]
+        fmax = f_maxwell(vx, vy, vz, T_w, 1., 0., 0., 0., gas_params.Rg)
+        Ni = (hv**3) * np.sum(f * np.where(v_nil > 0, v_nil, 0.))
+        Nr = (hv**3) * np.sum(fmax * np.where(v_nil < 0, v_nil, 0.))
+        # TODO: replace np.sqrt(2 * np.pi / (gas_params.Rg * T_w))
+        # with discrete quarature, as in the dissertation
+        n_wall = - Ni/ Nr
+#        n_wall = 2e+23 # temprorary
+        return n_wall * fmax
+            
+def comp_macro_param_and_j(f, vx, vy, vz, gas_params):
+    Rg = gas_params.Rg
+    hv = vx[1, 0, 0] - vx[0, 0, 0]
     n = (hv ** 3) * np.sum(f)
 
     ux = (1. / n) * (hv ** 3) * np.sum(vx * f)
@@ -26,19 +100,19 @@ def J(f, vx, vy, vz, hv, N, p):
     v2 = vx*vx + vy*vy + vz*vz
     u2 = ux*ux + uy*uy + uz*uz
     
-    T = (1. / (3. * n * p.Rg)) * ((hv ** 3) * np.sum(v2 * f) - n * u2)
+    T = (1. / (3. * n * Rg)) * ((hv ** 3) * np.sum(v2 * f) - n * u2)
 
     Vx = vx - ux
     Vy = vy - uy
     Vz = vz - uz
 
-    rho = p.m * n
+    rho = gas_params.m * n
 
-    P = rho * p.Rg * T
+    p = rho * Rg * T
 
-    cx = Vx / ((2. * p.Rg * T) ** (1. / 2.))
-    cy = Vy / ((2. * p.Rg * T) ** (1. / 2.))
-    cz = Vz / ((2. * p.Rg * T) ** (1. / 2.))
+    cx = Vx / ((2. * Rg * T) ** (1. / 2.))
+    cy = Vy / ((2. * Rg * T) ** (1. / 2.))
+    cz = Vz / ((2. * Rg * T) ** (1. / 2.))
     
     c2 = cx*cx + cy*cy + cz*cz
 
@@ -46,82 +120,107 @@ def J(f, vx, vy, vz, hv, N, p):
     Sy = (1. / n) * (hv ** 3) * np.sum(cy * c2 * f)
     Sz = (1. / n) * (hv ** 3) * np.sum(cz * c2 * f)
 
-    mu = p.mu_0 * ((p.T_0 + p.C) / (T + p.C)) * ((T / p.T_0) ** (3. / 2.))
+    mu = gas_params.mu(T)
 
-    f_plus = F_m(Vx, Vy, Vz, T, n, p) * (1. + (4. / 5.) * (1. - p.Pr) * (cx*Sx + cy*Sy + cz*Sz) * (c2 - (5. / 2.)))
+    f_plus = f_maxwell(vx, vy, vz, T, n, ux, uy, uz, gas_params.Rg) * (1. + (4. / 5.) * (1. - gas_params.Pr) * (cx*Sx + cy*Sy + cz*Sz) * (c2 - (5. / 2.)))
 
-    J = (f_plus - f) * (P / mu)
+    J = (f_plus - f) * (p / mu)
     
-    nu = P / mu
+    nu = p / mu
     
-    return J, n, ux, T, nu
+    return J, n, ux, uy, uz, T, nu, rho, p
 
-def solver(p, mesh, M, Kn, n_l, T_l, T_wall, Tau, vmax, N, CFL, filename, init = '0'):
     
-    n_s = n_l
-    T_s = T_l
-    l_s = p.d
+def solver(gas_params, problem, mesh, nt, vmax, nv, CFL, filename, init = '0'):
+    """Solve Boltzmann equation with model collision integral 
     
-    p_s = p.m * n_s * p.Rg * T_s
+    gas_params -- object of class GasParams, contains gas parameters and viscosity law
     
-    v_s = np.sqrt(2. * p.Rg * T_s)
+    problem -- object of class Problem, contains list of boundary conditions,
+    data for b.c., and function for initial condition
     
-    lambda_s = Kn * l_s
+    mesh - object of class Mesh
     
-    u_l = M * ((p.g * p.Rg * T_l) ** .5)
+    nt -- number of time steps
     
-    # TODO add calculation of cell diameter
+    vmax -- maximum velocity in each direction in velocity mesh
+    
+    nv -- number of nodes in velocity mesh
+    
+    CFL -- courant number
+    
+    filename -- name of output file for f
+    
+    init - name of restart file
+    """
+
+    t = time.time()
+
+    log = open('log.txt', 'w') #log file
+
+    cpu_time = np.zeros(10)
+    cpu_time_name = ['reconstruction', 'boundary', 'fluxes', 'rhs', 'update', 'rhs_j']
+        
     h = np.min(mesh.cell_diam)
-    tau = h * CFL / vmax
+    tau = h * CFL / (vmax * (3.**0.5))
     
-    t = 0.
+    hv = 2. * vmax / nv
+    vx_ = np.linspace(-vmax+hv/2, vmax-hv/2, nv) # coordinates of velocity nodes
     
-    hv = 2. * vmax / N
-    vx_ = np.linspace(-vmax+hv/2, vmax-hv/2, N)
     vx, vy, vz = np.meshgrid(vx_, vx_, vx_, indexing='ij')
-    L = mesh.nc
+
+    v_est = (vx**2 + vy**2 + vz**2)**0.5 # old v_est
     
-    F_l = F_m(vx-u_l, vy, vz, T_l, n_l, p)
-    
-    F_wall = F_m(vx, vy, vz, T_wall, 1., p)
-    
-    # initial condition 
-    f = np.zeros((L, N, N, N))
-    
+    # set initial condition 
+    f = np.zeros((mesh.nc, nv, nv, nv))
     if (init == '0'):
-        for i in range(L):
-            f[i, :, :, :] = F_l
-            
+        for i in range(mesh.nc):
+            x = mesh.cell_center_coo[i, 0]
+            y = mesh.cell_center_coo[i, 1]
+            z = mesh.cell_center_coo[i, 2]
+            f[i, :, :, :] = problem.f_init(x, y, z, vx, vy, vz) 
     else:
-        f = np.reshape(np.loadtxt(init), (L, N, N, N))
-    
-    
-#    for i in range(L):
-#        f[i, :, :, :] = problem.set_init_cond(mesh.cell_center_coo[i])
-    
-    tmp = np.zeros((L, N, N, N))
+#        restart from distribution function
+#        f = np.reshape(np.load(init), (mesh.nc, nv, nv, nv))
+#        restart form macroparameters array
+        init_data = np.loadtxt(init)
+        for ic in range(mesh.nc):
+            f[ic, :, :, :] = f_maxwell(vx, vy, vz, init_data[ic, 5], init_data[ic, 0], init_data[ic, 1], init_data[ic, 2], init_data[ic, 3], gas_params.Rg)
+        
+    tmp = np.zeros((mesh.nc, nv, nv, nv))
     # TODO: may be join f_plus and f_minus in one array
-    f_plus = np.zeros((mesh.nf, N, N, N))
-    f_minus = np.zeros((mesh.nf, N, N, N))
-    Flow = np.zeros((mesh.nf, N, N, N))
-    RHS = np.zeros((L, N, N, N))
+    f_plus = np.zeros((mesh.nf, nv, nv, nv)) # Reconstructed values on the right
+    f_minus = np.zeros((mesh.nf, nv, nv, nv)) # reconstructed values on the left
+    flux = np.zeros((mesh.nf, nv, nv, nv)) # Flux values
+    rhs = np.zeros((mesh.nc, nv, nv, nv))
     
-    v_nil = np.zeros((N, N, N))
+    v_nil = np.zeros((nv, nv, nv))
+    # Arrays for macroparameters
+    n = np.zeros(mesh.nc)
+    rho = np.zeros(mesh.nc)
+    ux = np.zeros(mesh.nc)
+    uy = np.zeros(mesh.nc)
+    uz = np.zeros(mesh.nc)
+    p =  np.zeros(mesh.nc)
+    T = np.zeros(mesh.nc)
+    nu = np.zeros(mesh.nc)
+    data = np.zeros((mesh.nc, 7))
     
-    Dens = np.zeros(L)
-    Vel = np.zeros(L)
-    Temp = np.zeros(L)
+    frob_norm_rhs = np.zeros(mesh.nc)
+    frob_norm_iter = np.array([])
+
+    t_ = time.time() - t
+#    print "initialization", t_
+    log.write("initialization " + str(t_) + "\n")
     
-    Frob_norm_RHS = np.zeros(L)
-    Frob_norm_iter = np.array([])
-    
-    t1 = time.clock()
-    
-    while(t < Tau*tau):
-        t += tau
+    t1 = time.time()
+    it = 0
+    while(it < nt):
+        it += 1
         # reconstruction for inner faces
         # 1st order
-        for ic in range(L):
+        t = time.time()
+        for ic in range(mesh.nc):
             for j in range(6):
                 jf = mesh.cell_face_list[ic, j]
                 # TODO: think how do this without 'if'
@@ -129,90 +228,122 @@ def solver(p, mesh, M, Kn, n_l, T_l, T_wall, Tau, vmax, N, CFL, filename, init =
                     f_minus[jf, :, :, :] = f[ic, :, :, :]
                 else:
                     f_plus[jf, :, :, :] = f[ic, :, :, :]
-                
+        t_ = time.time() - t
+        cpu_time[0] += t_
+#        print "reconstruction", it, t_
+        log.write("reconstruction " + str(it) + " " + str(t_) + "\n")
+                      
         # boundary condition
         # loop over all boundary faces
+        t = time.time()
         for j in range(mesh.nbf):
             jf = mesh.bound_face_info[j, 0] # global face index
-                # TODO: think how do this without 'if'
-            if (mesh.bound_face_info[j, 1] == 0): # symmetry
-                if (mesh.bound_face_info[j, 2] == 1):
-                    f_plus[jf, :, :, :] = f_minus[jf, :, :, :]
-                else:
-                    f_minus[jf, :, :, :] = f_plus[jf, :, :, :]
-            elif (mesh.bound_face_info[j, 1] == 1): # inlet
-                if (mesh.bound_face_info[j, 2] == 1):
-                    f_plus[jf, :, :, :] = F_l
-                else:
-                    f_minus[jf, :, :, :] = F_l
-            elif (mesh.bound_face_info[j, 1] == 2): # outlet
-                if (mesh.bound_face_info[j, 2] == 1):
-                    f_plus[jf, :, :, :] = F_l
-                else:
-                    f_minus[jf, :, :, :] = F_l
-            elif (mesh.bound_face_info[j, 1] == 3): # wall
-                if (mesh.bound_face_info[j, 2] == 1):
-                    n_wall = J(f_minus[jf, :, :, :], vx, vy, vz, hv, N, p)[1]
-                    f_plus[jf, :, :, :] = n_wall * F_wall
-                else:
-                    n_wall = J(f_plus[jf, :, :, :], vx, vy, vz, hv, N, p)[1]
-                    f_minus[jf, :, :, :] = n_wall * F_wall
-                
+            bc_num = mesh.bound_face_info[j, 1]
+            bc_type = problem.bc_type_list[bc_num]
+            bc_data = problem.bc_data[bc_num]
+            v_nil = mesh.face_normals[jf, 0] * vx + mesh.face_normals[jf, 1] * vy + mesh.face_normals[jf, 2] * vz
+            if (mesh.bound_face_info[j, 2] == 1):
+                # TODO: normal velocities v_nil can be pre-computed one time
+                # then we can pass to function p.bc only v_nil
+                f_plus[jf, :, :, :] =  set_bc(gas_params, bc_type, bc_data, f_minus[jf, :, :, :], vx, vy, vz, v_nil)
+            else:
+                f_minus[jf, :, :, :] = set_bc(gas_params, bc_type, bc_data, f_plus[jf, :, :, :], vx, vy, vz, -v_nil)
+        t_ = time.time() - t
+        cpu_time[1] += t_
+#        print "boundary", it, t_
+        log.write("boundary " + str(it) + " " + str(t_) + "\n")
 
-        
         # riemann solver - compute fluxes
+        t = time.time()
         for jf in range(mesh.nf):
             v_nil = mesh.face_normals[jf, 0] * vx + mesh.face_normals[jf, 1] * vy + mesh.face_normals[jf, 2] * vz
-            Flow[jf, :, :, :] = mesh.face_areas[jf] * v_nil * np.where((v_nil < 0), f_plus[jf, :, :, :], f_minus[jf, :, :, :])
+#            flux[jf, :, :, :] = mesh.face_areas[jf] * v_nil * np.where((v_nil < 0), f_plus[jf, :, :, :], f_minus[jf, :, :, :])
+            flux[jf] = (1. / 2.) * mesh.face_areas[jf] * ((v_nil * (f_plus[jf, :, :, :] + f_minus[jf, :, :, :])) - (v_est * (f_plus[jf, :, :, :] - f_minus[jf, :, :, :])))
+        t_ = time.time() - t
+        cpu_time[2] += t_
+#        print "fluxes", it, t_ 
+        log.write("fluxes " + str(it) + " " + str(t_) + "\n")
                 
-        
-        RHS[:] = 0.
-        for ic in range(L):
+        # computation of the right-hand side
+        t = time.time()
+        rhs[:] = 0.
+        for ic in range(mesh.nc):
+            # sum up fluxes from all faces of this cell
             for j in range(6):
                 jf = mesh.cell_face_list[ic, j]
-                RHS[ic, :, :, :] += - (mesh.cell_face_normal_direction[ic, j]) * (1. / mesh.cell_volumes[ic]) * Flow[jf, :, :, :]
-            RHS[ic, :, :, :] += J(f[ic, :, :, :], vx, vy, vz, hv, N, p)[0]
+                rhs[ic, :, :, :] += - (mesh.cell_face_normal_direction[ic, j]) * (1. / mesh.cell_volumes[ic]) * flux[jf, :, :, :]
+            # Compute macroparameters and collision integral
+            jt = time.time()
+            J, n[ic], ux[ic], uy[ic], uz[ic], T[ic], nu[ic], rho[ic], p[ic] = comp_macro_param_and_j(f[ic, :, :, :], vx, vy, vz, gas_params)
+            rhs[ic, :, :, :] += J
+            cpu_time[5] += (time.time() - jt)
+        t_ = time.time() - t
+        cpu_time[3] += t_
+#        print "rhs", it, t_
+        log.write("rhs " + str(it) + " " + str(t_) + "\n")
         
-            
-        Frob_norm_iter = np.append(Frob_norm_iter, np.linalg.norm(RHS))
-
+        frob_norm_iter = np.append(frob_norm_iter, np.linalg.norm(rhs))
 
         # update values
-        for ic in range(L):
-            tmp[ic, :, :, :] = f[ic, :, :, :] + tau * RHS[ic, :, :, :]
-                
-        f = tmp
+        t = time.time()
+        for ic in range(mesh.nc):
+            tmp[ic, :, :, :] = f[ic, :, :, :] + tau * rhs[ic, :, :, :]
+        f = np.copy(tmp)
+        t_ = time.time() - t
+        cpu_time[4] += t_
+#        print "update", it, t_
+        log.write("update " + str(it) + " " + str(t_) + "\n")
         
-        if ((int(t/tau) % 100) == 0):     
+        if ((it % 100) == 0):     
             fig, ax = plt.subplots(figsize = (20,10))
-            line, = ax.semilogy(Frob_norm_iter)
-            ax.set(title='$Steps =$' + str(int(t/tau)))
+            line, = ax.semilogy(frob_norm_iter/frob_norm_iter[0])
+            ax.set(title='$Steps =$' + str(it))
             plt.savefig('norm_iter.png')
+            plt.close()
+                
+            fig, ax = plt.subplots(figsize = (20,10))
 
+            colors = cm.rainbow((T - np.min(T))/(np.max(T) - np.min(T)))
+            ax.scatter(mesh.cell_center_coo[:, 0], mesh.cell_center_coo[:, 1], s = 10, c=colors)
+            ax.set_xlim(np.min(mesh.cell_center_coo[:, 0]), np.max(mesh.cell_center_coo[:, 0]))
+            ax.set_ylim(np.min(mesh.cell_center_coo[:, 1]), np.max(mesh.cell_center_coo[:, 1]))
+            plt.savefig('scatter_temp_iter=' + str(it) + '.png')
+            plt.close()
+                            
+            data[:, 0] = n[:] # now n instead of rho
+            data[:, 1] = ux[:]
+            data[:, 2] = uy[:]
+            data[:, 3] = uz[:]
+            data[:, 4] = p[:]
+            data[:, 5] = T[:]
+            data[:, 6] = np.zeros(mesh.nc)
+            
+            write_tecplot(mesh, data, 'cyl.dat', ('n', 'ux', 'uy', 'uz', 'p', 'T', 'rank'))
         
         
-    t2 = time.clock() - t1
+    t2 = time.time() - t1
 
     t2 = int(round(t2))
     
-    print "time =", t2 / 3600, "h", (t2 % 3600) / 60, "m", t2 % 60, "s"
-
-    for ic in range(L):
-        Dens[ic] = J(f[ic, :, :, :], vx, vy, vz, hv, N, p)[1]
-        Vel[ic] = J(f[ic, :, :, :], vx, vy, vz, hv, N, p)[2]
-        Temp[ic] = J(f[ic, :, :, :], vx, vy, vz, hv, N, p)[3]
+    
+#    print "time =", t2 / 3600, "h", (t2 % 3600) / 60, "m", t2 % 60, "s"
+    log.write("time = " + str(t2 / 3600) + " h " + str((t2 % 3600) / 60) + " m " + str(t2 % 60) + " s " + "\n")
         
-    for ic in range(L):
-        Frob_norm_RHS[ic] = np.linalg.norm(RHS[ic])
+    for ic in range(mesh.nc):
+        frob_norm_rhs[ic] = np.linalg.norm(rhs[ic])
 
 #    l = 1. / ((2 ** .5) * np.pi * n_l * p.d * p.d)
-        
 #    delta = l / (n_r - n_l) * np.max(Dens[1:] - Dens[:-1]) / (2 * h)
 
-    np.savetxt(filename, np.ravel(f))
+    np.save(filename, np.ravel(f))
     
-    Return = namedtuple('Return', ['f', 'Dens', 'Vel', 'Temp', 'Frob_norm_iter', 'Frob_norm_RHS'])
+    Return = namedtuple('Return', ['f', 'n', 'ux', 'uy', 'uz', 'T', 'p', 'frob_norm_iter', 'frob_norm_rhs'])
     
-    S = Return(f, Dens, Vel, Temp, Frob_norm_iter, Frob_norm_RHS)
-    
+    S = Return(f, n, ux, uy, uz, T, p, frob_norm_iter, frob_norm_rhs)
+
+    for i in range(len(cpu_time_name)):
+#        print cpu_time[i], cpu_time_name[i]
+        log.write(str(cpu_time[i]) + " " + cpu_time_name[i] + "\n")
+
+    log.close()    
     return S
